@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<meta name="theme-color" content="#10172a">
+<title>Coin Collector</title>
+<style>
+  :root { color-scheme: dark; --bg:#10172a; --panel:#19243d; --gold:#ffd34e; --mint:#61f2c2; --text:#f4f7ff; }
+  * { box-sizing:border-box; }
+  html,body { margin:0; width:100%; min-height:100%; background:radial-gradient(circle at top,#25365d 0,#10172a 60%); color:var(--text); font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif; }
+  body { display:flex; justify-content:center; padding:14px; touch-action:manipulation; }
+  .app { width:min(100%,520px); }
+  header { display:flex; align-items:center; justify-content:space-between; gap:10px; margin:4px 0 12px; }
+  .brand { font-weight:900; font-size:clamp(20px,5vw,29px); letter-spacing:.3px; }
+  .brand span { color:var(--gold); }
+  .pill { background:#263453; border:1px solid #40527b; border-radius:999px; padding:8px 12px; font-size:13px; white-space:nowrap; }
+  .stats { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-bottom:10px; }
+  .stat { background:rgba(25,36,61,.95); border:1px solid #344566; border-radius:14px; padding:10px 8px; text-align:center; }
+  .stat small { display:block; color:#aab8d6; font-size:11px; text-transform:uppercase; letter-spacing:1px; }
+  .stat strong { display:block; font-size:22px; margin-top:2px; }
+  .game-wrap { position:relative; border:2px solid #3a4c70; border-radius:18px; overflow:hidden; box-shadow:0 15px 40px #0006; background:#101a2f; }
+  canvas { display:block; width:100%; height:auto; aspect-ratio:360/500; touch-action:none; }
+  .overlay { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; padding:26px; background:#081020d9; }
+  .overlay.hidden { display:none; }
+  .overlay h1 { font-size:34px; line-height:1.05; margin:0 0 8px; }
+  .overlay p { color:#c7d3ec; line-height:1.5; margin:6px 0 18px; }
+  button { border:0; color:#10172a; font:800 15px system-ui,sans-serif; border-radius:13px; padding:12px 18px; background:linear-gradient(135deg,#ffe47a,#ffbd36); box-shadow:0 4px 0 #bd7e18; cursor:pointer; touch-action:manipulation; }
+  button:active { transform:translateY(2px); box-shadow:0 2px 0 #bd7e18; }
+  .help { color:#b8c5df; font-size:12px; text-align:center; margin:10px 0 12px; }
+  .controls { display:grid; grid-template-columns:repeat(3,1fr); gap:9px; max-width:260px; margin:0 auto; user-select:none; -webkit-user-select:none; }
+  .controls button { min-height:58px; font-size:23px; padding:8px; border-radius:16px; background:linear-gradient(145deg,#344a74,#243554); color:white; box-shadow:0 4px 0 #17233b; border:1px solid #536a98; }
+  .controls button:active,.controls button.active { background:#4c6698; transform:translateY(2px); box-shadow:0 2px 0 #17233b; }
+  .empty { visibility:hidden; }
+  .bottom { display:flex; justify-content:center; gap:10px; margin-top:14px; }
+  .bottom button { background:#263553; color:#f4f7ff; box-shadow:none; border:1px solid #40527b; }
+  .bottom button.primary { background:var(--mint); color:#08251f; border:0; }
+  footer { text-align:center; color:#7f91b5; font-size:11px; margin:15px 0 5px; }
+</style>
+</head>
+<body>
+<main class="app">
+  <header><div class="brand">🪙 COIN <span>COLLECTOR</span></div><div class="pill">LEVEL 01</div></header>
+  <section class="stats" aria-label="Game stats">
+    <div class="stat"><small>Score</small><strong id="score">0</strong></div>
+    <div class="stat"><small>Coins left</small><strong id="left">10</strong></div>
+    <div class="stat"><small>Time</small><strong id="time">60</strong></div>
+  </section>
+  <div class="game-wrap">
+    <canvas id="game" width="360" height="500" aria-label="Coin Collector game board"></canvas>
+    <div class="overlay" id="overlay">
+      <h1>Ready to<br><span style="color:#ffd34e">collect?</span></h1>
+      <p>Collect all 10 coins before time runs out.<br>Use the touch buttons to move.<br>Avoid the police officer and blue blocks!</p>
+      <button id="start">START GAME ▶</button>
+    </div>
+  </div>
+  <div class="help">Move with the arrow buttons. Collect every 🪙 before the timer reaches zero.</div>
+  <div class="controls" aria-label="Touch controls">
+    <span class="empty"></span><button data-dir="up" aria-label="Move up">▲</button><span class="empty"></span>
+    <button data-dir="left" aria-label="Move left">◀</button><button data-dir="down" aria-label="Move down">▼</button><button data-dir="right" aria-label="Move right">▶</button>
+  </div>
+  <div class="bottom"><button id="restart">↻ Restart</button><button class="primary" id="sound">♪ Sound: On</button></div>
+  <footer>Made for mobile browsers • Coin Collector v1.1 — Police Chase</footer>
+</main>
+<script>
+(() => {
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+  const scoreEl = document.getElementById('score');
+  const leftEl = document.getElementById('left');
+  const timeEl = document.getElementById('time');
+  const overlay = document.getElementById('overlay');
+  const startBtn = document.getElementById('start');
+  const restartBtn = document.getElementById('restart');
+  const soundBtn = document.getElementById('sound');
+  const W = canvas.width, H = canvas.height;
+  const keys = {up:false,down:false,left:false,right:false};
+  let player, hunter, coins, blocks, score, timeLeft, running, lastTime, moveClock, soundOn = true, audioCtx;
+  const rand = (min,max) => Math.floor(Math.random()*(max-min+1))+min;
+  function beep(freq=650, duration=.07) {
+    if (!soundOn) return;
+    try {
+      audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+      const osc = audioCtx.createOscillator(), gain = audioCtx.createGain();
+      osc.type='sine'; osc.frequency.value=freq; gain.gain.value=.055;
+      osc.connect(gain); gain.connect(audioCtx.destination);
+      osc.start(); gain.gain.exponentialRampToValueAtTime(.001,audioCtx.currentTime+duration);
+      osc.stop(audioCtx.currentTime+duration);
+    } catch(e) {}
+  }
+  function resetGame() {
+    player = {x:30,y:30,size:18};
+    hunter = {x:W-28,y:H-28,size:22};
+    score=0; timeLeft=60; running=false; lastTime=0; moveClock=0;
+    blocks = [
+      {x:78,y:68,w:90,h:18},{x:205,y:112,w:18,h:100},
+      {x:60,y:190,w:105,h:18},{x:245,y:260,w:65,h:18},
+      {x:115,y:315,w:18,h:95},{x:25,y:390,w:90,h:18},
+      {x:205,y:420,w:110,h:18}
+    ];
+    coins=[];
+    let attempts=0;
+    while(coins.length<10 && attempts<2000) {
+      attempts++;
+      const c={x:rand(18,W-18),y:rand(24,H-24),r:9};
+      const insideBlock=blocks.some(b=>c.x>b.x-14&&c.x<b.x+b.w+14&&c.y>b.y-14&&c.y<b.y+b.h+14);
+      const nearPlayer=Math.hypot(c.x-player.x,c.y-player.y)<45;
+      const nearCoin=coins.some(o=>Math.hypot(c.x-o.x,c.y-o.y)<28);
+      if(!insideBlock&&!nearPlayer&&!nearCoin) coins.push(c);
+    }
+    updateStats(); draw();
+  }
+  function updateStats() { scoreEl.textContent=score; leftEl.textContent=coins.length; timeEl.textContent=Math.max(0,Math.ceil(timeLeft)); }
+  function circleRect(cx,cy,r,b) {
+    const nx=Math.max(b.x,Math.min(cx,b.x+b.w)), ny=Math.max(b.y,Math.min(cy,b.y+b.h));
+    return (cx-nx)**2+(cy-ny)**2 < r*r;
+  }
+  function move(dx,dy) {
+    if(!running) return;
+    const speed=3.1;
+    const nx=Math.max(player.size/2,Math.min(W-player.size/2,player.x+dx*speed));
+    const ny=Math.max(player.size/2,Math.min(H-player.size/2,player.y+dy*speed));
+    const blocked=blocks.some(b=>circleRect(nx,ny,player.size*.43,b));
+    if(!blocked){player.x=nx;player.y=ny;}
+    for(let i=coins.length-1;i>=0;i--) {
+      if(Math.hypot(player.x-coins[i].x,player.y-coins[i].y)<player.size/2+coins[i].r) {
+        coins.splice(i,1); score+=10; beep(820,.09);
+        if(navigator.vibrate) navigator.vibrate(20);
+      }
+    }
+    // Police hunter chases the player, but uses the same wall/block collision rules.
+    // Resolve X and Y separately so the hunter can slide around corners without passing through obstacles.
+    if (running && hunter) {
+      const hx = player.x - hunter.x, hy = player.y - hunter.y;
+      const distance = Math.hypot(hx, hy) || 1;
+      const hunterSpeed = 1.35; // Medium difficulty
+      const stepX = (hx / distance) * hunterSpeed;
+      const stepY = (hy / distance) * hunterSpeed;
+      const hunterRadius = hunter.size * 0.43;
+      const nextX = Math.max(hunter.size / 2, Math.min(W - hunter.size / 2, hunter.x + stepX));
+      if (!blocks.some(b => circleRect(nextX, hunter.y, hunterRadius, b))) {
+        hunter.x = nextX;
+      }
+      const nextY = Math.max(hunter.size / 2, Math.min(H - hunter.size / 2, hunter.y + stepY));
+      if (!blocks.some(b => circleRect(hunter.x, nextY, hunterRadius, b))) {
+        hunter.y = nextY;
+      }
+      if (Math.hypot(player.x - hunter.x, player.y - hunter.y) < (player.size + hunter.size) * 0.58) {
+        draw(); endGame(false, true); return;
+      }
+    }
+    updateStats();
+    if(coins.length===0) endGame(true);
+  }
+  function draw() {
+    ctx.clearRect(0,0,W,H);
+    ctx.fillStyle='#101a2f'; ctx.fillRect(0,0,W,H);
+    ctx.strokeStyle='#263657'; ctx.lineWidth=1;
+    for(let x=0;x<=W;x+=25){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,H);ctx.stroke();}
+    for(let y=0;y<=H;y+=25){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(W,y);ctx.stroke();}
+    blocks.forEach(b=>{
+      ctx.fillStyle='#314e7c'; ctx.fillRect(b.x,b.y,b.w,b.h);
+      ctx.strokeStyle='#6f95d3';ctx.lineWidth=2;ctx.strokeRect(b.x+1,b.y+1,b.w-2,b.h-2);
+    });
+    coins.forEach(c=>{
+      ctx.save();ctx.translate(c.x,c.y);
+      ctx.shadowColor='#ffd34e';ctx.shadowBlur=12;
+      ctx.fillStyle='#ffd34e';ctx.beginPath();ctx.arc(0,0,c.r,0,Math.PI*2);ctx.fill();
+      ctx.shadowBlur=0;ctx.strokeStyle='#fff1a3';ctx.lineWidth=2;ctx.stroke();
+      ctx.fillStyle='#9b6512';ctx.font='bold 12px system-ui';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText('$',0,.5);
+      ctx.restore();
+    });
+    if(hunter) {
+      // Police hunter: navy uniform, face, cap, badge and flashing roof lights.
+      ctx.save();ctx.translate(hunter.x,hunter.y);
+      const pulse = Math.sin(performance.now()/115) > 0;
+      ctx.shadowColor = pulse ? '#ff405d' : '#3d8dff'; ctx.shadowBlur=12;
+      ctx.fillStyle='#15294b';ctx.beginPath();ctx.roundRect(-10,-7,20,21,5);ctx.fill();
+      ctx.shadowBlur=0;
+      // Face
+      ctx.fillStyle='#f1bd91';ctx.beginPath();ctx.arc(0,-7,7,0,Math.PI*2);ctx.fill();
+      // Uniform shirt details
+      ctx.fillStyle='#dbe8ff';ctx.fillRect(-1,-1,2,11);
+      ctx.fillStyle='#ffd34e';ctx.beginPath();ctx.arc(5,2,2.3,0,Math.PI*2);ctx.fill();
+      // Police cap and badge
+      ctx.fillStyle='#0b1830';ctx.fillRect(-8,-15,16,5);ctx.fillRect(-10,-11,20,2);
+      ctx.fillStyle='#ffd34e';ctx.beginPath();ctx.arc(0,-12.5,1.8,0,Math.PI*2);ctx.fill();
+      // Small red/blue siren flash
+      ctx.fillStyle=pulse?'#ff405d':'#3d8dff';ctx.fillRect(-8,-19,7,3);
+      ctx.fillStyle=pulse?'#3d8dff':'#ff405d';ctx.fillRect(1,-19,7,3);
+      ctx.restore();
+    }
+    if(player) {
+      ctx.save();ctx.translate(player.x,player.y);
+      ctx.shadowColor='#61f2c2';ctx.shadowBlur=14;
+      ctx.fillStyle='#61f2c2';ctx.beginPath();ctx.roundRect(-9,-9,18,18,5);ctx.fill();
+      ctx.shadowBlur=0;ctx.fillStyle='#123d38';ctx.fillRect(-5,-3,3,3);ctx.fillRect(3,-3,3,3);
+      ctx.fillStyle='#123d38';ctx.fillRect(-4,3,8,2);ctx.restore();
+    }
+  }
+  function endGame(won, caught=false) {
+    running=false; Object.keys(keys).forEach(k=>keys[k]=false);
+    overlay.classList.remove('hidden');
+    const headline = won ? '🎉 You did it!' : (caught ? '🚨 Police caught you!' : '⏰ Time up!');
+    const message = won ? 'You collected every coin!' : (caught ? 'The police officer caught you! Keep moving and collect the coins.' : 'You ran out of time.');
+    overlay.innerHTML = `<h1>${headline}</h1><p>${message}<br>Final score: <b>${score}</b></p><button id="again">PLAY AGAIN ↻</button>`;
+    document.getElementById('again').addEventListener('click',startGame);
+    beep(won?980:260,.2);
+  }
+  function startGame() {
+    resetGame(); overlay.classList.add('hidden'); running=true; lastTime=performance.now();
+    requestAnimationFrame(loop);
+  }
+  function loop(now) {
+    if(!running) return;
+    const dt=Math.min((now-lastTime)/1000,.05); lastTime=now; timeLeft-=dt;
+    moveClock+=dt;
+    if(moveClock>=.016) {
+      let dx=(keys.right?1:0)-(keys.left?1:0);
+      let dy=(keys.down?1:0)-(keys.up?1:0);
+      if(dx&&dy){dx*=.707;dy*=.707;}
+      if(dx||dy) move(dx,dy);
+      else if (running) move(0,0);
+      moveClock=0;
+    }
+    if(timeLeft<=0){timeLeft=0;updateStats();draw();endGame(false);return;}
+    updateStats();draw();requestAnimationFrame(loop);
+  }
+  document.querySelectorAll('[data-dir]').forEach(btn=>{
+    const dir=btn.dataset.dir;
+    const down=e=>{e.preventDefault();keys[dir]=true;btn.classList.add('active');};
+    const up=e=>{e.preventDefault();keys[dir]=false;btn.classList.remove('active');};
+    btn.addEventListener('pointerdown',down);
+    ['pointerup','pointercancel','pointerleave'].forEach(ev=>btn.addEventListener(ev,up));
+    btn.addEventListener('contextmenu',e=>e.preventDefault());
+  });
+  window.addEventListener('keydown',e=>{
+    const map={ArrowUp:'up',w:'up',ArrowDown:'down',s:'down',ArrowLeft:'left',a:'left',ArrowRight:'right',d:'right'};
+    if(map[e.key]){keys[map[e.key]]=true;e.preventDefault();}
+  });
+  window.addEventListener('keyup',e=>{
+    const map={ArrowUp:'up',w:'up',ArrowDown:'down',s:'down',ArrowLeft:'left',a:'left',ArrowRight:'right',d:'right'};
+    if(map[e.key])keys[map[e.key]]=false;
+  });
+  startBtn.addEventListener('click',startGame);
+  restartBtn.addEventListener('click',()=>{resetGame();overlay.classList.remove('hidden');overlay.innerHTML='<h1>Ready again?</h1><p>Collect all 10 coins and avoid the police officer.</p><button id="start2">START GAME ▶</button>';document.getElementById('start2').addEventListener('click',startGame);});
+  soundBtn.addEventListener('click',()=>{soundOn=!soundOn;soundBtn.textContent='♪ Sound: '+(soundOn?'On':'Off');if(soundOn)beep();});
+  resetGame();
+})();
+</script>
+</body>
+</html>
